@@ -7,13 +7,13 @@ RUN apk add --no-cache python3 py3-pip ffmpeg curl && \
 
 WORKDIR /app
 
-# نسخ ملف go.mod فقط
-COPY go.mod ./
-RUN go mod download
-
-# نسخ باقي ملفات المشروع
+# نسخ ملفات المشروع أولاً
 COPY . .
 
+# ترتيب وتحديث الاعتماديات تلقائياً داخل الحاوية
+RUN go mod tidy
+
+# بناء المشروع
 RUN go build -o main main.go
 
 EXPOSE 8080

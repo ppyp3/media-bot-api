@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -13,22 +12,14 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// ذاكرة تخزين مؤقت خارقة للسرعة ومنع الضغط على السيرفر
 var cache = struct {
 	sync.RWMutex
 	items map[string]MediaInfo
 }{items: make(map[string]MediaInfo)}
 
 type MediaInfo struct {
-	Title     string
-	Thumbnail string
-	Formats   []FormatInfo
-	Expiry    time.Time
-}
-
-type FormatInfo struct {
-	Resolution string
-	URL        string
+	Title  string
+	Expiry time.Time
 }
 
 func main() {
@@ -47,7 +38,6 @@ func main() {
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
 
-	// محرك معالجة الرسائل المتوازي الخارق
 	go func() {
 		for update := range updates {
 			if update.Message == nil || update.Message.Text == "" {
@@ -62,11 +52,6 @@ func main() {
 
 أهلاً بك! أنا نظام تحميل سحابي متطور يعمل بأعلى سرعة مدعوم بلغة Go وخوادم سحابية مؤمنة.
 
-✅ **المميزات الخارقة:**
-• استخراج كافة الجودات المتاحة (فيديو وصوت) بدقة فائقة.
-• دعم كامل لأكثر من 1000 منصة عالمية (يوتيوب، انستغرام، تيك توك، تويتر، إلخ).
-• سرعة استجابة فورية عبر الذاكرة المؤقتة.
-
 🔄 **قم بإرسال الرابط المطلوب الآن للبدء!**`
 				msg := tgbotapi.NewMessage(chatID, welcomeMsg)
 				msg.ParseMode = "Markdown"
@@ -74,22 +59,20 @@ func main() {
 				continue
 			}
 
-			// فحص الكاش للسرعة الفورية
 			cache.RLock()
 			if cached, found := cache.items[text]; found && time.Now().Before(cached.Expiry) {
 				cache.RUnlock()
-				bot.Send(tgbotapi.NewMessage(chatID, "⚡ [استجابة فورية من السيرفر الخارق]\n📌 العنوان: "+cached.Title+"\n✅ الملف جاهز للتحميل بأعلى جودة!"))
+				bot.Send(tgbotapi.NewMessage(chatID, "⚡ [استجابة فورية من السيرفر الخارق]\n📌 العنوان: "+cached.Title))
 				continue
 			}
 			cache.RUnlock()
 
-			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🚀 جاري التحليل السحابي واستخراج الروابط الخارقة..."))
+			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🚀 جاري التحليل السحابي واستخراج الروابط..."))
 
-			// سحب البيانات الشاملة بأعلى دقة
 			cmd := exec.Command("yt-dlp", "--dump-json", "--no-warnings", text)
 			output, err := cmd.Output()
 			if err != nil {
-				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ عذراً، الرابط غير مدعوم أو أن المنصة فرضت قيوداً مؤقتة. حاول برابط آخر."))
+				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ عذراً، الرابط غير مدعوم أو أن المنصة فرضت قيوداً. حاول مجدداً."))
 				continue
 			}
 
@@ -97,10 +80,9 @@ func main() {
 			json.Unmarshal(output, &rawData)
 			title, _ := rawData["title"].(string)
 			if title == "" {
-				title = "محتوى رقمي خارق"
+				title = "محتوى رقمي"
 			}
 
-			// حفظ النتيجة في الكاش الخارق
 			cache.Lock()
 			cache.items[text] = MediaInfo{
 				Title:  title,
@@ -108,19 +90,17 @@ func main() {
 			}
 			cache.Unlock()
 
-			// إرسال النتيجة النهائية للمستخدم
-			bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "🔥 **تم الاستخراج بنجاح تام!**\n\n📌 **العنوان:** "+title+"\n\n⚡ *النظام يعمل بأقصى كفاءة وسرعة سحابية.*"))
+			bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "🔥 **تم الاستخراج بنجاح تام!**\n\n📌 **العنوان:** "+title))
 		}
 	}()
 
-	// سيرفر API فائق السرعة
 	app := fiber.New()
 	app.Get("/download", func(c *fiber.Ctx) error {
 		targetURL := c.Query("url")
 		if targetURL == "" {
 			return c.Status(400).JSON(fiber.Map{"error": "الرجاء إرسال الرابط المطلوب"})
 		}
-		return c.JSON(fiber.Map{"status": "success", "engine": "Go-Ultra-Core", "url": targetURL})
+		return c.JSON(fiber.Map{"status": "success", "url": targetURL})
 	})
 
 	port := os.Getenv("PORT")
@@ -128,6 +108,6 @@ func main() {
 		port = "8080"
 	}
 
-	log.Println("النظام الخارق يعمل بكفاءة تامة على المنفذ " + port)
+	log.Println("النظام الخارق يعمل على المنفذ " + port)
 	app.Listen(":" + port)
 }

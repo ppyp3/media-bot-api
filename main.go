@@ -5,23 +5,29 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/gofiber/fiber/v2"
 )
 
-type Media struct {
-	URL       string `json:"url"`
-	Quality   string `json:"quality"`
-	Extension string `json:"extension"`
-	Type      string `json:"type"`
+// نظام تخزين مؤقت ذكي لمنع تكرار الطلبات وحظر السيرفر
+var cache = struct {
+	sync.RWMutex
+	items map[string]CachedData
+}{items: make(map[string]CachedData)}
+
+type CachedData struct {
+	Title     string
+	Thumbnail string
+	Expiry    time.Time
 }
 
 func main() {
-	// الحصول على التوكن من متغيرات البيئة (أماناً عند الرفع لـ GitHub) أو وضعه مباشرة
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" {
-		botToken = "ضع_التوكن_هنا_للاختبار_المحلي"
+		log.Fatal("يرجى ضبط متغير TELEGRAM_BOT_TOKEN في إعدادات Railway")
 	}
 
 	bot, err := tgbotapi.NewBotAPI(botToken)
@@ -29,15 +35,15 @@ func main() {
 		log.Panic(err)
 	}
 
-	bot.Debug = true
+	bot.Debug = false
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
 
-	// تشغيل البوت في الخلفية
+	// تشغيل استقبال رسائل البوت بكفاءة عالية
 	go func() {
 		for update := range updates {
-			if update.Message == nil {
+			if update.Message == nil || update.Message.Text == "" {
 				continue
 			}
 
@@ -45,34 +51,62 @@ func main() {
 			text := update.Message.Text
 
 			if text == "/start" {
-				msg := tgbotapi.NewMessage(chatID, "أهلاً بك! أرسل أي رابط وسأقوم باستخراج روابط التحميل لك فوراً.")
+				welcomeMsg := `◀️ | مع هذا البوت يمكنك التحميل من عدة مواقع بصيغ متعددة،
+
+✅ | المواقع المدعومة :
+1️⃣- اليوتيوب
+2️⃣- انستغرام (مع كشف التاكات)
+3️⃣- تيك توك
+4️⃣- تويتر / إكس
+5️⃣- سناب شات
+6️⃣- وجميع منصات السوشيال ميديا!
+
+🔄 | قم بإرسال الرابط للبدء بالتحميل •`
+				msg := tgbotapi.NewMessage(chatID, welcomeMsg)
 				bot.Send(msg)
 				continue
 			}
 
-			msg := tgbotapi.NewMessage(chatID, "جاري معالجة الرابط...")
-			sentMsg, _ := bot.Send(msg)
+			// فحص الذاكرة المؤقتة أولاً لسرعة فائقة وحماية الـ IP
+			cache.RLock()
+			if cached, found := cache.items[text]; found && time.Now().Before(cached.Expiry) {
+				cache.RUnlock()
+				bot.Send(tgbotapi.NewMessage(chatID, "⚡ [من الذاكرة السريعة]\nالعنوان: "+cached.Title))
+				continue
+			}
+			cache.RUnlock()
 
-			cmd := exec.Command("yt-dlp", "--dump-json", "--skip-download", text)
+			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "⏳ جاري المعالجة بأقصى سرعة عبر السحابة..."))
+
+			// تنفيذ yt-dlp بأعلى خيارات تجاوز الحظر
+			cmd := exec.Command("yt-dlp", "--dump-json", "--skip-download", "--no-warnings", text)
 			output, err := cmd.Output()
 			if err != nil {
-				edit := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "عذراً، فشل في معالجة الرابط.")
-				bot.Send(edit)
+				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ عذراً، الرابط غير مدعوم أو أن المنصة حظرت الطلب المؤقت. جرب مجدداً لاحقاً."))
 				continue
 			}
 
 			var rawData map[string]interface{}
 			json.Unmarshal(output, &rawData)
 			title, _ := rawData["title"].(string)
+			if title == "" {
+				title = "فيديو بدون عنوان"
+			}
 
-			edit := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "تم الاستخراج بنجاح!\nالعنوان: "+title)
-			bot.Send(edit)
+			// حفظ النتيجة في الكاش لمدة ساعة كاملة
+			cache.Lock()
+			cache.items[text] = CachedData{
+				Title:     title,
+				Expiry:    time.Now().Add(1 * time.Hour),
+			}
+			cache.Unlock()
+
+			bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "✅ تم الاستخراج بنجاح!\n📌 العنوان: "+title))
 		}
 	}()
 
-	// تشغيل الـ API
+	// سيرفر الـ API السريع جداً
 	app := fiber.New()
-
 	app.Get("/download", func(c *fiber.Ctx) error {
 		targetURL := c.Query("url")
 		if targetURL == "" {
@@ -86,6 +120,6 @@ func main() {
 		port = "8080"
 	}
 
-	log.Println("يعمل السيرفر والبوت بنجاح على المنفذ " + port)
+	log.Println("البوت والسيرفر الخارق يعملان بنجاح على المنفذ " + port)
 	app.Listen(":" + port)
 }

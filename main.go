@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -13,7 +14,7 @@ import (
 
 func main() {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	apifyToken := os.Getenv("APIFY_TOKEN") // سيتم سحبه من إعدادات Railway بأمان
+	apifyToken := os.Getenv("APIFY_TOKEN")
 
 	if botToken == "" {
 		log.Fatal("يرجى ضبط TELEGRAM_BOT_TOKEN")
@@ -42,7 +43,7 @@ func main() {
 				continue
 			}
 
-			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🔄 جاري معالجة الطلب..."))
+			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🔄 جاري معالجة الطلب عبر السحابة..."))
 
 			apiURL := "https://api.apify.com/v2/actors/easyapi~all-in-one-media-downloader/runs?token=" + apifyToken
 
@@ -52,11 +53,19 @@ func main() {
 			jsonBody, _ := json.Marshal(inputPayload)
 
 			resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonBody))
-			if err != nil || resp.StatusCode != http.StatusCreated {
-				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ فشل الاتصال بخدمة التحميل."))
+			if err != nil {
+				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ خطأ في الشبكة: "+err.Error()))
 				continue
 			}
 			defer resp.Body.Close()
+
+			// قراءة السبب إذا حدث خطأ من سيرفر Apify
+			if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				log.Println("Apify Error Response:", string(bodyBytes))
+				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ رفضت منصة Apify الطلب. تحقق من الرصيد أو صيغة الرابط."))
+				continue
+			}
 
 			bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "🔥 **تم بدء معالجة الرابط في السحابة بنجاح!**"))
 		}

@@ -48,11 +48,11 @@ func main() {
 			text := update.Message.Text
 
 			if text == "/start" {
-				bot.Send(tgbotapi.NewMessage(chatID, "⚡ أهلاً بك في بوت التحميل الخارق! أرسل أي رابط لنبدأ المعالجة الفورية."))
+				bot.Send(tgbotapi.NewMessage(chatID, "⚡ أهلاً بك! أرسل رابط الفيديو وسيقوم البوت بتحميله وإرساله لك هنا مباشرة."))
 				continue
 			}
 
-			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🚀 **جاري المعالجة بسرعة صاروخية...**"))
+			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🚀 **جاري المعالجة وسحب الفيديو...**"))
 
 			apiURL := "https://api.apify.com/v2/actors/easyapi~all-in-one-media-downloader/runs?token=" + apifyToken
 			inputPayload := map[string]interface{}{
@@ -84,9 +84,9 @@ func main() {
 				continue
 			}
 
-			// نظام التحقق الخارق (Polling) كل ثانيتين لمعرفة هل انتهى التحميل أم لا
+			// نظام التحقق السريع لجلب الرابط المباشر للملف
 			var mediaLink string
-			for i := 0; i < 15; i++ { // يحاول لمدة تصل إلى 30 ثانية كحد أقصى
+			for i := 0; i < 15; i++ {
 				time.Sleep(2 * time.Second)
 
 				statusURL := "https://api.apify.com/v2/actor-runs/" + runID + "?token=" + apifyToken
@@ -100,7 +100,6 @@ func main() {
 				var statusObj ApifyRunResponse
 				json.Unmarshal(statusBytes, &statusObj)
 
-				// إذا اكتمل التحميل بنجاح في السحابة
 				if statusObj.Data.Status == "SUCCEEDED" {
 					datasetURL := "https://api.apify.com/v2/datasets/" + datasetID + "/items?token=" + apifyToken
 					getResp, err := http.Get(datasetURL)
@@ -115,12 +114,12 @@ func main() {
 
 					if len(items) > 0 {
 						item := items[0]
-						if val, ok := item["videoUrl"].(string); ok && val != "" {
-							mediaLink = val
-						} else if val, ok := item["url"].(string); ok && val != "" {
-							mediaLink = val
-						} else if val, ok := item["downloadUrl"].(string); ok && val != "" {
-							mediaLink = val
+						// نبحث عن حقل الفيديو المباشر (مثل videoUrl أو downloadUrl)
+						for _, key := range []string{"videoUrl", "downloadUrl", "url"} {
+							if val, ok := item[key].(string); ok && val != "" && val != text {
+								mediaLink = val
+								break
+							}
 						}
 					}
 					break
@@ -130,9 +129,19 @@ func main() {
 			}
 
 			if mediaLink != "" {
-				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "🔥 **تم التحميل بنجاح وبسرعة فائقة!**\n\n🔗 الرابط المباشر للملف:\n"+mediaLink))
+				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "📥 **جاري تحميل الفيديو ورفعه إلى البوت...**"))
+
+				// تحميل الفيديو كملف مرئي وإرساله مباشرة لتليجرام
+				videoMsg := tgbotapi.NewVideo(chatID, tgbotapi.FileURL(mediaLink))
+				videoMsg.Caption = "✨ تم التحميل بواسطة البوت بنجاح!"
+				_, err := bot.Send(videoMsg)
+				
+				if err != nil {
+					// لو حدث خطأ في رفع الفيديو كملف، نرسل الرابط المباشر كخيار بديل
+					bot.Send(tgbotapi.NewMessage(chatID, "⚠️ تعذر إرسال الملف مباشرة، إليك الرابط المباشر:\n"+mediaLink))
+				}
 			} else {
-				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "⚠️ استغرقت العملية وقتاً أطول من المعتاد أو فشل استخراج الرابط، جرب مجدداً."))
+				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "⚠️ تعذر استخراج رابط الفيديو المباشر من المنصة."))
 			}
 		}
 	}()

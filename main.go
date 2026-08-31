@@ -1,31 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
-	"os/exec"
-	"sync"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/gofiber/fiber/v2"
 )
 
-var cache = struct {
-	sync.RWMutex
-	items map[string]MediaInfo
-}{items: make(map[string]MediaInfo)}
-
-type MediaInfo struct {
-	Title  string
-	Expiry time.Time
-}
-
 func main() {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	apifyToken := os.Getenv("APIFY_TOKEN") // سيتم سحبه من إعدادات Railway بأمان
+
 	if botToken == "" {
-		log.Fatal("يرجى ضبط متغير TELEGRAM_BOT_TOKEN في إعدادات Railway")
+		log.Fatal("يرجى ضبط TELEGRAM_BOT_TOKEN")
 	}
 
 	bot, err := tgbotapi.NewBotAPI(botToken)
@@ -33,7 +24,6 @@ func main() {
 		log.Panic(err)
 	}
 
-	bot.Debug = false
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
@@ -48,66 +38,34 @@ func main() {
 			text := update.Message.Text
 
 			if text == "/start" {
-				welcomeMsg := `⚡ **البوت الخارق للتحميل السحابي المتعدد** ⚡
-
-أهلاً بك! أنا نظام تحميل سحابي متطور يعمل بأعلى سرعة مدعوم بلغة Go وخوادم سحابية مؤمنة.
-
-🔄 **قم بإرسال الرابط المطلوب الآن للبدء!**`
-				msg := tgbotapi.NewMessage(chatID, welcomeMsg)
-				msg.ParseMode = "Markdown"
-				bot.Send(msg)
+				bot.Send(tgbotapi.NewMessage(chatID, "⚡ أهلاً بك! أرسل أي رابط للتحميل السحابي الفوري."))
 				continue
 			}
 
-			cache.RLock()
-			if cached, found := cache.items[text]; found && time.Now().Before(cached.Expiry) {
-				cache.RUnlock()
-				bot.Send(tgbotapi.NewMessage(chatID, "⚡ [استجابة فورية من السيرفر الخارق]\n📌 العنوان: "+cached.Title))
+			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🔄 جاري معالجة الطلب..."))
+
+			apiURL := "https://api.apify.com/v2/actors/easyapi~all-in-one-media-downloader/runs?token=" + apifyToken
+
+			inputPayload := map[string]interface{}{
+				"link": text,
+			}
+			jsonBody, _ := json.Marshal(inputPayload)
+
+			resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonBody))
+			if err != nil || resp.StatusCode != http.StatusCreated {
+				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ فشل الاتصال بخدمة التحميل."))
 				continue
 			}
-			cache.RUnlock()
+			defer resp.Body.Close()
 
-			sentMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, "🚀 جاري التحليل السحابي واستخراج الروابط..."))
-
-			cmd := exec.Command("yt-dlp", "--dump-json", "--no-warnings", text)
-			output, err := cmd.Output()
-			if err != nil {
-				bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "❌ عذراً، الرابط غير مدعوم أو أن المنصة فرضت قيوداً. حاول مجدداً."))
-				continue
-			}
-
-			var rawData map[string]interface{}
-			json.Unmarshal(output, &rawData)
-			title, _ := rawData["title"].(string)
-			if title == "" {
-				title = "محتوى رقمي"
-			}
-
-			cache.Lock()
-			cache.items[text] = MediaInfo{
-				Title:  title,
-				Expiry: time.Now().Add(2 * time.Hour),
-			}
-			cache.Unlock()
-
-			bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "🔥 **تم الاستخراج بنجاح تام!**\n\n📌 **العنوان:** "+title))
+			bot.Send(tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, "🔥 **تم بدء معالجة الرابط في السحابة بنجاح!**"))
 		}
 	}()
 
 	app := fiber.New()
-	app.Get("/download", func(c *fiber.Ctx) error {
-		targetURL := c.Query("url")
-		if targetURL == "" {
-			return c.Status(400).JSON(fiber.Map{"error": "الرجاء إرسال الرابط المطلوب"})
-		}
-		return c.JSON(fiber.Map{"status": "success", "url": targetURL})
-	})
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-
-	log.Println("النظام الخارق يعمل على المنفذ " + port)
 	app.Listen(":" + port)
 }
